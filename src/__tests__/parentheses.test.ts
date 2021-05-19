@@ -69,6 +69,5 @@ describe('parentheses', () => {
       ]
     }
     expect(ast).toEqual(tree);
-  }); 
-
+  });
 })

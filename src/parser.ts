@@ -1,20 +1,21 @@
 export declare namespace Parser {
   type LiteralTerminals = 'NUMBER' | 'STRING' | 'NULL' | 'BOOLEAN'
-  type OperatorTerminals = 'ADDITIVE_OPERATOR' | 'MULTIPLICATIVE_OPERATOR' | 'EQUALITY_OPERATOR' | 'GREATER_THAN_OPERATOR' | 'RELATIONAL_OPERATOR'
+  type OperatorTerminals = 'ADDITIVE_OPERATOR' | 'MULTIPLICATIVE_OPERATOR' | 'EQUALITY_OPERATOR' | 'GREATER_THAN_OPERATOR' | 'RELATIONAL_OPERATOR' | 'LOGICAL_NOT'
   type SymbolTerminals = ';' | '(' | ')'
   export type Terminal = LiteralTerminals | OperatorTerminals | SymbolTerminals
 
-  type TokenTypes = 'BooleanLiteral' | 'NumberLiteral' | 'StringLiteral' | 'NullLiteral' | 'BinaryExpression' | 'Program'
+  type TokenTypes = 'BooleanLiteral' | 'NumberLiteral' | 'StringLiteral' | 'NullLiteral' | 'BinaryExpression' | 'Program' | 'UnaryExpression'
 
   export type Tokens = Token | Array<Tokens> | null
 
   export type Token = {
-    type: TokenTypes,
-    value?: string,
+    type: TokenTypes
+    value?: string
     operator?: string
     body?: Tokens
     left?: Tokens
     right?: Tokens
+    argument?: Tokens
   }
 
   export type ParseFn = (t: Tokenizer) => Tokens
@@ -35,10 +36,13 @@ const SPEC: Array<[RegExp, Parser.Terminal | null]> = [
   [/^\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*/, null],
 
   // Operator
-  [/^(\+|\-)/, 'ADDITIVE_OPERATOR'],
+  [/^(\+|-)/, 'ADDITIVE_OPERATOR'],
   [/^(\*|\/)/, 'MULTIPLICATIVE_OPERATOR'],
-  [/^(=|\!)=/, 'EQUALITY_OPERATOR'],
+  [/^(=|!)=/, 'EQUALITY_OPERATOR'],
   [/^(>|<)(=|)/, 'RELATIONAL_OPERATOR'],
+
+  // Logical
+  [/^!/, 'LOGICAL_NOT'],
 
   //
   [/^;/, ';'],
@@ -47,6 +51,7 @@ const SPEC: Array<[RegExp, Parser.Terminal | null]> = [
 
   // Numbers
   [/^\d+/, 'NUMBER'],
+
 
   // Strings
   [/^"[^"]*"/, 'STRING'],
@@ -100,7 +105,7 @@ class Tokenizer {
     )
   }
 
-  eat(tokenType: string) {
+  eat(tokenType: Parser.Terminal) {
     const token = this.lookahead()
 
     if (token === null) {
@@ -121,6 +126,14 @@ class Tokenizer {
     }
   }
 }
+
+//
+/**
+ * Functions below are defined in reverse order.
+ * Start at the parse function at the very bottom
+ * and work your way up to the function directly below.
+ */
+//
 
 const NumberLiteral: Parser.ParseFn = (t) => {
   const token = t.eat('NUMBER')
@@ -198,7 +211,28 @@ const buildBinaryExpression = (type: Parser.Terminal, fn: Parser.ParseFn): Parse
   }
 }
 
-const MultiplicativeExpression = buildBinaryExpression('MULTIPLICATIVE_OPERATOR', Parentheses)
+const UnaryExpression: Parser.ParseFn = (t) => {
+  const lookahead = t.lookahead();
+
+  switch (lookahead?.type) {
+    case 'ADDITIVE_OPERATOR':
+      return {
+        type: 'UnaryExpression',
+        operator: t.eat('ADDITIVE_OPERATOR').value,
+        argument: UnaryExpression(t)
+      }
+    case 'LOGICAL_NOT':
+      return {
+        type: 'UnaryExpression',
+        operator: t.eat('LOGICAL_NOT').value,
+        argument: UnaryExpression(t)
+      }
+  }
+
+  return Parentheses(t)
+}
+
+const MultiplicativeExpression = buildBinaryExpression('MULTIPLICATIVE_OPERATOR', UnaryExpression)
 const AdditiveExpression = buildBinaryExpression('ADDITIVE_OPERATOR', MultiplicativeExpression)
 const EqualityExpression = buildBinaryExpression('EQUALITY_OPERATOR', AdditiveExpression)
 
@@ -206,9 +240,13 @@ const RelationalExpression = buildBinaryExpression('RELATIONAL_OPERATOR', Equali
 
 const Statement: Parser.ParseFn = (t) => {
   const output = []
-  while (t.lookahead() !== null) {
-    output.push(RelationalExpression(t));
+  let lookahead = t.lookahead()
+  while (lookahead !== null) {
+    if (lookahead.type !== ';') {
+      output.push(RelationalExpression(t));
+    }
     t.eat(';')
+    lookahead = t.lookahead()
   }
   return output
 }
